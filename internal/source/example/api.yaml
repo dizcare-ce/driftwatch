@@ -1,0 +1,11 @@
+# Example service definition file.
+# Place one file per service under the directory specified by
+# source_dir in config.yaml.
+
+name: api
+version: "1.0.0"
+environment: production
+config:
+  port: "8080"
+  log_level: "info"
+  max_connections: "100"
