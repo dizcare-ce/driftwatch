@@ -1,0 +1,26 @@
+# driftwatch example configuration
+# Copy to config.yaml and adjust for your environment.
+
+# How often the daemon polls sources for drift.
+# Minimum value: 1s
+poll_interval: 30s
+
+# Log verbosity: debug | info | warn | error
+log_level: info
+
+# List of service definition sources to monitor.
+sources:
+  # A raw YAML file representing the desired state of a service.
+  - name: payment-service
+    path: /etc/services/payment-service.yaml
+    kind: raw
+
+  # A Kubernetes manifest (Deployment, ConfigMap, etc.).
+  - name: auth-deployment
+    path: /etc/k8s/auth-deployment.yaml
+    kind: kubernetes
+
+  # A Docker Compose file.
+  - name: dev-stack
+    path: ./docker-compose.yml
+    kind: docker-compose
