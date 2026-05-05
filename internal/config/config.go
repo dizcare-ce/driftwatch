@@ -1,6 +1,7 @@
 package config
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"time"
@@ -8,70 +9,75 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// Config holds the top-level driftwatch daemon configuration.
+// Kind identifies the type of backend being checked.
+type Kind string
+
+const (
+	KindKubernetes Kind = "kubernetes"
+	KindDocker     Kind = "docker"
+)
+
+// Config is the top-level driftwatch configuration.
 type Config struct {
-	PollInterval time.Duration `yaml:"poll_interval"`
-	LogLevel     string        `yaml:"log_level"`
-	Sources      []Source      `yaml:"sources"`
+	Sources   SourcesConfig  `yaml:"sources"`
+	Drift     DriftConfig    `yaml:"drift"`
+	Reporter  ReporterConfig `yaml:"reporter"`
+	Scheduler SchedulerConfig `yaml:"scheduler"`
 }
 
-// Source defines a single service definition source to watch.
-type Source struct {
-	Name string `yaml:"name"`
-	Path string `yaml:"path"`
-	Kind string `yaml:"kind"` // e.g. "kubernetes", "docker-compose", "raw"
+// SourcesConfig describes where service definitions are loaded from.
+type SourcesConfig struct {
+	Dir string `yaml:"dir"`
+}
+
+// DriftConfig controls drift-detection behaviour.
+type DriftConfig struct {
+	Kind Kind `yaml:"kind"`
+}
+
+// ReporterConfig controls output format.
+type ReporterConfig struct {
+	Format string `yaml:"format"` // "text" or "json"
+}
+
+// SchedulerConfig controls how often drift checks run.
+type SchedulerConfig struct {
+	Interval time.Duration `yaml:"interval"`
 }
 
 // DefaultConfig returns a Config populated with sensible defaults.
-func DefaultConfig() *Config {
-	return &Config{
-		PollInterval: 30 * time.Second,
-		LogLevel:     "info",
-		Sources:      []Source{},
+func DefaultConfig() Config {
+	return Config{
+		Sources:  SourcesConfig{Dir: "services"},
+		Drift:    DriftConfig{Kind: KindKubernetes},
+		Reporter: ReporterConfig{Format: "text"},
+		Scheduler: SchedulerConfig{Interval: 5 * time.Minute},
 	}
 }
 
-// Load reads a YAML config file from the given path and merges it
-// over the defaults.
-func Load(path string) (*Config, error) {
+// Load reads a YAML config file from path, merging over defaults.
+func Load(path string) (Config, error) {
 	cfg := DefaultConfig()
 
-	f, err := os.Open(path)
+	data, err := os.ReadFile(path)
 	if err != nil {
-		return nil, fmt.Errorf("config: open %q: %w", path, err)
-	}
-	defer f.Close()
-
-	dec := yaml.NewDecoder(f)
-	dec.KnownFields(true)
-	if err := dec.Decode(cfg); err != nil {
-		return nil, fmt.Errorf("config: decode %q: %w", path, err)
+		if errors.Is(err, os.ErrNotExist) {
+			return cfg, fmt.Errorf("config file not found: %s", path)
+		}
+		return cfg, fmt.Errorf("reading config: %w", err)
 	}
 
-	if err := cfg.validate(); err != nil {
-		return nil, fmt.Errorf("config: validation: %w", err)
+	if err := yaml.Unmarshal(data, &cfg); err != nil {
+		return cfg, fmt.Errorf("parsing config: %w", err)
+	}
+
+	if cfg.Drift.Kind != KindKubernetes && cfg.Drift.Kind != KindDocker {
+		return cfg, fmt.Errorf("unsupported drift kind %q: must be 'kubernetes' or 'docker'", cfg.Drift.Kind)
+	}
+
+	if cfg.Scheduler.Interval <= 0 {
+		cfg.Scheduler.Interval = DefaultConfig().Scheduler.Interval
 	}
 
 	return cfg, nil
-}
-
-// validate performs basic sanity checks on the loaded configuration.
-func (c *Config) validate() error {
-	if c.PollInterval < time.Second {
-		return fmt.Errorf("poll_interval must be at least 1s, got %s", c.PollInterval)
-	}
-	for i, s := range c.Sources {
-		if s.Name == "" {
-			return fmt.Errorf("sources[%d]: name is required", i)
-		}
-		if s.Path == "" {
-			return fmt.Errorf("sources[%d]: path is required", i)
-		}
-		switch s.Kind {
-		case "kubernetes", "docker-compose", "raw":
-		default:
-			return fmt.Errorf("sources[%d]: unsupported kind %q", i, s.Kind)
-		}
-	}
-	return nil
 }
