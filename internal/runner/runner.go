@@ -1,67 +1,80 @@
-// Package runner wires together the core driftwatch pipeline: loading
-// service definitions, detecting drift, reporting results, and optionally
-// notifying on significant findings.
+// Package runner orchestrates a single drift-check cycle: load sources,
+// compare against live state, report results, and record history.
 package runner
 
 import (
 	"context"
 	"fmt"
-	"io"
+	"log/slog"
 
 	"driftwatch/internal/drift"
-	"driftwatch/internal/notifier"
+	"driftwatch/internal/history"
+	"driftwatch/internal/metrics"
 	"driftwatch/internal/reporter"
+	"driftwatch/internal/retry"
 	"driftwatch/internal/source"
 )
 
-// Runner executes a single drift-check cycle.
+// Runner executes one full drift-detection cycle.
 type Runner struct {
 	loader   *source.Loader
 	detector *drift.Detector
 	reporter *reporter.Reporter
-	notifier *notifier.Notifier
+	history  *history.History
+	metrics  *metrics.Metrics
+	policy   retry.Policy
+	log      *slog.Logger
 }
 
-// New constructs a Runner from its collaborators.
+// New constructs a Runner with the supplied dependencies.
 func New(
 	l *source.Loader,
 	d *drift.Detector,
 	r *reporter.Reporter,
-	n *notifier.Notifier,
+	h *history.History,
+	m *metrics.Metrics,
+	log *slog.Logger,
 ) *Runner {
 	return &Runner{
 		loader:   l,
 		detector: d,
 		reporter: r,
-		notifier: n,
+		history:  h,
+		metrics:  m,
+		policy:   retry.DefaultPolicy(),
+		log:      log,
 	}
 }
 
-// Run loads all service definitions, compares each against its live state,
-// writes a report, and fires notifications. It returns the first error
-// encountered, but always attempts to report whatever results were gathered.
-func (r *Runner) Run(ctx context.Context, out io.Writer) error {
-	defs, err := r.loader.LoadAll(ctx)
-	if err != nil {
-		return fmt.Errorf("runner: load definitions: %w", err)
-	}
+// Run performs a single drift-check cycle, retrying transient load errors
+// according to the configured retry policy.
+func (r *Runner) Run(ctx context.Context) error {
+	var definitions []source.Definition
 
-	var results []drift.Result
-	for _, def := range defs {
-		res, err := r.detector.Compare(ctx, def)
+	loadErr := r.policy.Do(ctx, func() error {
+		defs, err := r.loader.LoadAll(ctx)
 		if err != nil {
-			return fmt.Errorf("runner: compare %q: %w", def.Name, err)
+			r.log.Warn("source load failed, will retry", "err", err)
+			return err
 		}
-		results = append(results, res)
+		definitions = defs
+		return nil
+	})
+	if loadErr != nil {
+		r.metrics.RecordRun(nil, loadErr)
+		return fmt.Errorf("load sources: %w", loadErr)
 	}
 
-	if err := r.reporter.Write(out, results); err != nil {
-		return fmt.Errorf("runner: write report: %w", err)
+	results := r.detector.Compare(definitions)
+
+	if err := r.reporter.Write(ctx, results); err != nil {
+		r.log.Warn("reporter write failed", "err", err)
 	}
 
-	if err := r.notifier.Notify(ctx, results); err != nil {
-		return fmt.Errorf("runner: notify: %w", err)
+	if err := r.history.Record(results); err != nil {
+		r.log.Warn("history record failed", "err", err)
 	}
 
+	r.metrics.RecordRun(results, nil)
 	return nil
 }
