@@ -83,3 +83,16 @@ func TestRun_ReporterError_Propagates(t *testing.T) {
 		t.Fatal("expected error, got nil")
 	}
 }
+
+func TestRun_NotifierError_Propagates(t *testing.T) {
+	l := &stubLoader{defs: []drift.Definition{{Name: "svc"}}}
+	d := &stubDetector{}
+	rep := &stubReporter{}
+	not := &stubNotifier{err: errors.New("notify failed")}
+	r := runner.New(l, d, rep, not)
+
+	err := r.Run(context.Background(), &bytes.Buffer{})
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+}
