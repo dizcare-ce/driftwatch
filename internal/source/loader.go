@@ -52,6 +52,13 @@ func (l *Loader) LoadOne(name string) (ServiceDefinition, error) {
 	return l.loadFile(path)
 }
 
+// Exists reports whether a service definition file exists for the given name.
+func (l *Loader) Exists(name string) bool {
+	path := filepath.Join(l.BasePath, name+".yaml")
+	_, err := os.Stat(path)
+	return err == nil
+}
+
 func (l *Loader) loadFile(path string) (ServiceDefinition, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
