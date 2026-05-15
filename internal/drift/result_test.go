@@ -48,3 +48,15 @@ func TestDiff_Fields(t *testing.T) {
 		t.Errorf("unexpected diff values: %+v", d)
 	}
 }
+
+func TestResult_Summary_ContainsServiceName(t *testing.T) {
+	r := drift.Result{
+		Service: "payments",
+		Drifted: true,
+		Diffs:   []drift.Diff{{Field: "image", Expected: "v1", Actual: "v2"}},
+	}
+	got := r.Summary()
+	if !strings.Contains(got, "payments") {
+		t.Errorf("expected service name 'payments' in summary, got: %s", got)
+	}
+}
