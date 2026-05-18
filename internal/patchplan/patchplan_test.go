@@ -86,6 +86,23 @@ func TestBuild_MissingActual_DescribesAddition(t *testing.T) {
 	}
 }
 
+func TestBuild_MultipleDrifts_AllActionsPresent(t *testing.T) {
+	results := []drift.Result{
+		makeResult("api", []drift.Diff{
+			{Field: "replicas", Expected: 3, Actual: 1},
+			{Field: "image", Expected: "v2", Actual: "v1"},
+			{Field: "timeout", Expected: "30s", Actual: "10s"},
+		}),
+	}
+	plans := patchplan.Build(results)
+	if len(plans) != 1 {
+		t.Fatalf("expected 1 plan, got %d", len(plans))
+	}
+	if len(plans[0].Actions) != 3 {
+		t.Fatalf("expected 3 actions, got %d", len(plans[0].Actions))
+	}
+}
+
 func TestFormat_NoDrift_ReturnsSyncMessage(t *testing.T) {
 	out := patchplan.Format(nil)
 	if !strings.Contains(out, "in sync") {
