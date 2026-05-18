@@ -74,3 +74,11 @@ func TestLoad_PollIntervalTooShort(t *testing.T) {
 		t.Fatal("expected validation error for short poll_interval")
 	}
 }
+
+func TestLoad_EmptySources(t *testing.T) {
+	path := writeTempConfig(t, "sources: []\n")
+	_, err := config.Load(path)
+	if err == nil {
+		t.Fatal("expected validation error for empty sources list")
+	}
+}
